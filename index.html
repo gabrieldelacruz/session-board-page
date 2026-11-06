@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Session board</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c1e21; --muted: #6b7280; --line: #e3e5e8;
+    --accent: #2f6fed; --running: #16a34a; --waiting: #d97706; --blocked: #dc2626; --idle: #6b7280; --done: #9ca3af;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111317; --panel: #1a1d23; --ink: #e6e8eb; --muted: #9aa3ad; --line: #2a2f37; --accent: #7aa2ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 17px; margin: 0 8px 0 0; }
+  header .status { color: var(--muted); font-size: 12.5px; }
+  header .spacer { flex: 1; }
+  select, input, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  label.toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12.5px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; padding: 16px 20px; align-items: start; }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 60px; }
+  .lane > h2 { font-size: 13px; letter-spacing: .02em; text-transform: uppercase; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .lane > h2 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--lane-color); }
+  .lane > h2 .count { color: var(--muted); font-weight: normal; margin-left: auto; }
+  .lane.collapsed .cards { display: none; }
+  .cards { padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .card { border: 1px solid var(--line); border-left: 3px solid var(--lane-color); border-radius: 8px; padding: 9px 11px; background: var(--bg); }
+  .card .title { font-weight: 600; margin: 0 0 3px; }
+  .card .title a { color: inherit; text-decoration: none; }
+  .card .title a:hover { color: var(--accent); }
+  .card .meta { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .card .meta a { color: var(--accent); text-decoration: none; }
+  .card .next { margin: 6px 0 0; }
+  .card .note { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; white-space: pre-wrap; }
+  .card .age { color: var(--muted); font-size: 11.5px; margin-top: 5px; }
+  .empty { color: var(--muted); padding: 10px 14px; font-size: 12.5px; }
+  .error { margin: 16px 20px; padding: 12px 14px; border: 1px solid var(--blocked); border-radius: 8px; color: var(--blocked); }
+  .setup { max-width: 560px; margin: 40px auto; padding: 20px 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .setup h2 { margin: 0 0 8px; font-size: 16px; }
+  .setup p, .setup li { color: var(--muted); }
+  .setup ol { padding-left: 20px; }
+  .setup form { display: flex; gap: 8px; margin-top: 12px; }
+  .setup input { flex: 1; }
+  .setup .err { color: var(--blocked); min-height: 1.4em; margin: 8px 0 0; }
+  .setup a { color: var(--accent); }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Session board</h1>
+  <span class="status" id="status">loading…</span>
+  <span class="spacer"></span>
+  <input id="q" type="search" placeholder="search" size="18">
+  <select id="machine"><option value="">all machines</option></select>
+  <select id="project"><option value="">all projects</option></select>
+  <label class="toggle"><input type="checkbox" id="auto" checked> auto-refresh</label>
+  <button id="refresh">Refresh</button>
+  <button id="disconnect" title="Forget the GitHub token stored in this browser">Disconnect</button>
+</header>
+<div id="error" class="error" hidden></div>
+<section id="setup" class="setup" hidden>
+  <h2>Connect this browser to the board data</h2>
+  <p>The board lives in the private repo <code id="repoName"></code>. This page reads it through the GitHub API with a token that stays in this browser's local storage and goes only to <code>api.github.com</code>.</p>
+  <ol>
+    <li>Open <a id="tokenLink" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a>.</li>
+    <li>Repository access: <em>Only select repositories</em>, pick the data repo.</li>
+    <li>Repository permissions: <em>Contents</em> → <em>Read-only</em>. Generate the token.</li>
+  </ol>
+  <form id="tokenForm">
+    <input id="token" type="password" placeholder="github_pat_…" autocomplete="off" required>
+    <button type="submit">Save</button>
+  </form>
+  <p class="err" id="setupErr"></p>
+</section>
+<main id="lanes"></main>
+<script>
+// Where the data lives. The repo is private; the page is public and empty without a token.
+const DATA = { owner: "gabrieldelacruz", repo: "session-board", path: "board.json", ref: "main" };
+const LANES = [
+  ["running", "Running", "var(--running)"],
+  ["waiting", "Waiting on me", "var(--waiting)"],
+  ["blocked", "Blocked", "var(--blocked)"],
+  ["idle", "Idle", "var(--idle)"],
+  ["done", "Done", "var(--done)"],
+];
+const REFRESH_MS = 120000;
+const TOKEN_KEY = "board.token";
+// ?source=local reads board.json beside the page, for the local preview server.
+const localSource = new URLSearchParams(location.search).get("source") === "local";
+const prefs = JSON.parse(localStorage.getItem("board.prefs") || "{}");
+let board = { cards: [] };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function ago(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+function prLink(pr) {
+  if (!pr || !pr.number) return "";
+  const url = pr.repo ? `https://github.com/${pr.repo}/pull/${pr.number}` : "";
+  const label = `PR ${pr.number}${pr.state ? " · " + pr.state.toLowerCase() : ""}`;
+  return url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` : esc(label);
+}
+
+function cardHtml(c) {
+  const title = c.link ? `<a href="${esc(c.link)}">${esc(c.title)}</a>` : esc(c.title);
+  const meta = [
+    c.machine && esc(c.machine),
+    c.project && esc(c.project),
+    c.branch && `<code>${esc(c.branch)}</code>`,
+    prLink(c.pr),
+  ].filter(Boolean).join("<span>·</span>");
+  return `<div class="card">
+    <p class="title">${title}</p>
+    <div class="meta">${meta}</div>
+    ${c.next ? `<p class="next">${esc(c.next)}</p>` : ""}
+    ${c.note ? `<p class="note">${esc(c.note)}</p>` : ""}
+    <div class="age">updated ${ago(c.updated)}</div>
+  </div>`;
+}
+
+function fillSelect(id, values, current) {
+  const sel = $(id);
+  const first = sel.options[0].outerHTML;
+  sel.innerHTML = first + [...new Set(values.filter(Boolean))].sort().map((v) => `<option${v === current ? " selected" : ""}>${esc(v)}</option>`).join("");
+  sel.value = values.includes(current) ? current : "";
+}
+
+function render() {
+  const q = $("q").value.trim().toLowerCase();
+  const machine = $("machine").value, project = $("project").value;
+  const cards = board.cards.filter((c) =>
+    (!machine || c.machine === machine) &&
+    (!project || c.project === project) &&
+    (!q || [c.title, c.project, c.branch, c.next, c.note].join(" ").toLowerCase().includes(q)));
+  $("lanes").innerHTML = LANES.map(([key, name, color]) => {
+    const mine = cards.filter((c) => (c.state || "idle") === key).sort((a, b) => Date.parse(b.updated || 0) - Date.parse(a.updated || 0));
+    const collapsed = prefs.collapsed?.[key] ?? (key === "done");
+    return `<section class="lane${collapsed ? " collapsed" : ""}" data-lane="${key}" style="--lane-color:${color}">
+      <h2><span class="dot"></span>${name}<span class="count">${mine.length}</span></h2>
+      <div class="cards">${mine.length ? mine.map(cardHtml).join("") : `<div class="empty">nothing here</div>`}</div>
+    </section>`;
+  }).join("");
+  $("status").textContent = board.updated ? `data updated ${ago(board.updated)} · ${board.cards.length} cards` : `${board.cards.length} cards`;
+}
+
+function showSetup(message) {
+  $("setup").hidden = false;
+  $("lanes").hidden = true;
+  $("setupErr").textContent = message || "";
+  $("status").textContent = "not connected";
+}
+
+function hideSetup() {
+  $("setup").hidden = true;
+  $("lanes").hidden = false;
+}
+
+async function fetchBoard() {
+  if (localSource) {
+    const res = await fetch(`board.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  }
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) { showSetup(); return null; }
+  const url = `https://api.github.com/repos/${DATA.owner}/${DATA.repo}/contents/${DATA.path}?ref=${encodeURIComponent(DATA.ref)}&t=${Date.now()}`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github.raw+json", "X-GitHub-Api-Version": "2022-11-28" },
+  });
+  if (res.status === 401 || res.status === 403 || res.status === 404) {
+    localStorage.removeItem(TOKEN_KEY);
+    showSetup(`GitHub answered ${res.status} for ${DATA.owner}/${DATA.repo}: the token is wrong, expired, or lacks read access to that repo.`);
+    return null;
+  }
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+async function load() {
+  $("status").textContent = "refreshing…";
+  try {
+    const data = await fetchBoard();
+    if (!data) return;
+    if (!Array.isArray(data.cards)) throw new Error("board.json has no cards array");
+    board = data;
+    hideSetup();
+    $("error").hidden = true;
+  } catch (err) {
+    $("error").hidden = false;
+    $("error").textContent = `Could not load the board: ${err.message}`;
+  }
+  fillSelect("machine", board.cards.map((c) => c.machine), prefs.machine || "");
+  fillSelect("project", board.cards.map((c) => c.project), prefs.project || "");
+  render();
+}
+
+function savePrefs() {
+  prefs.machine = $("machine").value; prefs.project = $("project").value; prefs.auto = $("auto").checked;
+  localStorage.setItem("board.prefs", JSON.stringify(prefs));
+}
+
+$("repoName").textContent = `${DATA.owner}/${DATA.repo}`;
+$("q").addEventListener("input", render);
+for (const id of ["machine", "project"]) $(id).addEventListener("change", () => { savePrefs(); render(); });
+$("auto").addEventListener("change", savePrefs);
+$("refresh").addEventListener("click", load);
+$("disconnect").addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); board = { cards: [] }; render(); showSetup(); });
+$("tokenForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const token = $("token").value.trim();
+  if (!token) return;
+  localStorage.setItem(TOKEN_KEY, token);
+  $("token").value = "";
+  load();
+});
+$("lanes").addEventListener("click", (e) => {
+  const h = e.target.closest("h2"); if (!h) return;
+  const lane = h.parentElement, key = lane.dataset.lane;
+  prefs.collapsed = prefs.collapsed || {};
+  prefs.collapsed[key] = !lane.classList.contains("collapsed");
+  localStorage.setItem("board.prefs", JSON.stringify(prefs));
+  render();
+});
+if (prefs.auto === false) $("auto").checked = false;
+if (localSource) $("disconnect").hidden = true;
+setInterval(() => { if ($("auto").checked && document.visibilityState === "visible" && $("setup").hidden) load(); }, REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && $("auto").checked && $("setup").hidden) load(); });
+load();
+</script>
+</body>
+</html>
